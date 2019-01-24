@@ -15,6 +15,9 @@ icons_dict = bpy.utils.previews.new()
 script_path = bpy.context.space_data.text.filepath
 icons_dir = os.path.join(os.path.dirname(script_path), "icons")
 
+# Keep track of created materials.
+materials_dict = {}
+
 # Load icons :)
 iconFilenames = [f for f in os.listdir(icons_dir) if os.path.isfile(os.path.join(icons_dir, f))]
 for filename in iconFilenames:
@@ -46,29 +49,36 @@ def getSelectedObject(op, context):
 	
 def doApplyBrowserTextureToFace(hasAlpha, op, context):
 	textureFilename = getSelectedTexture(op, context)
+	textureFile = os.path.split(textureFilename)[1]
 	object = getSelectedObject(op, context)
 	
 	if len(object.data.uv_layers) == 0:
 		bpy.ops.mesh.uv_texture_add()
 	
 	# Create a new material
-	newMaterial = bpy.data.materials.new("__mapMaterial.00000")
-	newMaterial.use_shadeless = True
-	newMaterial.use_transparency = hasAlpha
-	newMaterial.transparency_method = 'Z_TRANSPARENCY'
-	newMaterial.alpha = 0
-	newMaterialIndex = len(object.data.materials)
+	materialName = "FaceMaterial_{}".format(os.path.splitext(textureFile)[0])
+	if materialName in materials_dict:
+		newMaterial = materials_dict[ materialName ]
+	else:
+		newMaterial = bpy.data.materials.new(materialName)
+		newMaterial.use_shadeless = True
+		newMaterial.use_transparency = hasAlpha
+		newMaterial.transparency_method = 'Z_TRANSPARENCY'
+		newMaterial.alpha = 0
+			
+		newTextureName = "FaceTexture_{}".format(os.path.splitext(textureFile)[0])
+		newTexture = bpy.data.textures.new(newTextureName, "IMAGE")
+		newTexture.image = bpy.data.images.load(textureFilename)
+			
+		newMaterial.texture_slots.add()
+		newMaterial.texture_slots[0].texture = newTexture
+		newMaterial.texture_slots[0].use_map_alpha = hasAlpha
+		newMaterial.texture_slots[0].alpha_factor = 1.0
 		
-	newTexture = bpy.data.textures.new("__mapTexture.00000", "IMAGE")
-	newTexture.image = bpy.data.images.load(textureFilename)
+		object.data.materials.append(newMaterial)
+		materials_dict[ materialName ] = newMaterial
 		
-	newMaterial.texture_slots.add()
-	newMaterial.texture_slots[0].texture = newTexture
-	newMaterial.texture_slots[0].use_map_alpha = hasAlpha
-	newMaterial.texture_slots[0].alpha_factor = 1.0
-	object.data.materials.append(newMaterial)
-
-	print(object.name)
+	newMaterialIndex = object.data.materials.keys().index(newMaterial.name)
 	mesh = bmesh.from_edit_mesh(object.data)
 	selectedFaces = [f for f in mesh.faces if f.select]
 	if len(selectedFaces) == 0:	
