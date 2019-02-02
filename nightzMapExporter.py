@@ -25,57 +25,6 @@ bl_info = {
 # Hold BMesh for each mesh.
 globalMeshes = {}
 
-def interpolateUv(a, b, amount):
-  assert amount <= 1, 'Amount is in percentages'
-  newUv = [ 0, 0 ]
-  newUv[0] = (1.0 - amount) * a[0] + (amount * b[0])
-  newUv[1] = (1.0 - amount) * a[1] + (amount * b[1])
-  return newUv
-    
-def writeBlenderVector(filePtr, v):
-  filePtr.write(fixedPoint(v.x))
-  filePtr.write(fixedPoint(v.z))
-  filePtr.write(fixedPoint(-v.y))
-
-def closePowerOf2(value, maximum):
-  newValue = 1
-  while newValue <= value:
-    newValue *= 2
-
-  return min(newValue, maximum)
-
-# image = [width, height, bpp, pixels]
-def getPixel(uv, x, y, image):
-  gammaValue = 1.8
-
-  if uv[0] > 1:
-    uv[0] = uv[0] - int(uv[0])
-  if uv[1] > 1:
-    uv[1] = uv[1] - int(uv[1])
-
-  width, height, bpp, pixels = image
-  x = int(width * uv[0])
-  y = int(height * uv[1]) 
-  baseIndex = int(y * width * bpp + x * bpp)
-  return [ pow(pixel, gammaValue) for pixel in pixels[ baseIndex:baseIndex + 4 ] ]
-
-def getColor(color):
-    intColor = [(int)(color[0] * 255), (int)
-                (color[1] * 255), (int)(color[2] * 255)]
-    return (intColor[0] << 16) | (intColor[1] << 8) | intColor[2]
-
-
-def fixedPoint(value):
-  convertedValue = int(value * 65536.0)
-  # convertedValue = None
-  # if value >= 0:
-  #   convertedValue = int(value * 65536.0 + 0.5) 
-  # else:
-  #   convertedValue = int(value * 65536.0 - 0.5) 
-
-  return ctypes.c_int32(ntohl(ctypes.c_uint32(convertedValue).value))
-
-
 class ExportMap(bpy.types.Operator):
     """Export selected objects to generic map format in json"""
     bl_idname = "export.to_generic_json_map"
@@ -96,36 +45,37 @@ class ExportMap(bpy.types.Operator):
             if obj.type != 'MESH':
                 continue
                 
+            objNumVertices = 0
             objMesh = bmesh.new()
             objMesh.from_mesh(obj.data)
             objMesh.faces.ensure_lookup_table()
+            
             if objMesh.faces.layers.int.get("FaceFlags") is None:
               objMesh.faces.layers.int.new("FaceFlags")
               
             flagsLayer = objMesh.faces.layers.int.get("FaceFlags")
 
-            print("Writing obj faces starting at vertex index {}".format(vertexCount))
+            print("Writing obj faces (with {} vertices) starting at vertex index {}".format(len(obj.data.vertices), vertexCount))
             for poly in objMesh.faces:
                 indices = []
                 if len(poly.loops) == 3:
-                  indices = [loop.index + vertexCount for loop in poly.loops[0:3]]
+                  indices = [obj.data.loops[loop.index].vertex_index for loop in poly.loops[0:3]]
                 elif len(poly.loops) == 4:
-                  indices = [loop.index + vertexCount for loop in poly.loops[0:4]]
+                  indices = [obj.data.loops[loop.index].vertex_index for loop in poly.loops[0:4]]
                 
                 materialIndex = poly.material_index
                 assert materialIndex != None, 'Object must have a material'
                 material = obj.data.materials[materialIndex]             
                 
                 faceData = "{ "
-                faceData += "\"indices\" : [ {} ],\n".format(", ".join(str(x) for x in indices))
+                faceData += "\"indices\" : [ {} ],\n".format(", ".join(str(x + vertexCount) for x in indices))
                 faceData += "\"material\" : \"{}\"\n".format(material.name)
                 faceData += "}"
                 
                 facesData.append(faceData)
                 faceCount += 1
             
-            # Add vertex count of active mesh to increase indices on next
-            # object.
+            # Add vertex count of active mesh to increase indices on next object.
             vertexCount += len(obj.data.vertices)
             
         return faceCount, ", ".join(facesData)
@@ -161,9 +111,11 @@ class ExportMap(bpy.types.Operator):
             if obj.type != 'MESH':
                 continue
                 
-            objMesh = obj.data
+            objMesh = bmesh.new()
+            objMesh.from_mesh(obj.data)
+            objMesh.verts.ensure_lookup_table()
             wsMatrix = obj.matrix_world
-            for v in objMesh.vertices:
+            for v in objMesh.verts:
                 transformedVertex = wsMatrix * Vector((v.co[0], v.co[1], v.co[2], 1.0))
                 vertexData.append( transformedVertex[0])
                 vertexData.append(-transformedVertex[1])
@@ -216,16 +168,10 @@ class ExportMap(bpy.types.Operator):
             faceCount, faceData = self.getFaces()
             materialCount, materialData = self.getMaterials()
             
-            print("Vertex Data:\n {} \n\n".format(vertexData))
-            print("Face Data:\n {} \n\n".format(faceData))
-            print("Material Data:\n {} \n\n".format(materialData))
+            # print("Vertex Data:\n {} \n\n".format(vertexData))
+            # print("Face Data:\n {} \n\n".format(faceData))
+            # print("Material Data:\n {} \n\n".format(materialData))
             
-            # Faces for frame
-            # self.writeFaces(filePtr)
-
-            # Vertices for frame
-            # self.writeVerticesForFrame(0, filePtr)
-
             filePtr.write("{\n")
             filePtr.write("  \"numFaces\" : {},\n".format(faceCount))
             filePtr.write("  \"numVertices\" : {},\n".format(vertexCount))
@@ -234,6 +180,8 @@ class ExportMap(bpy.types.Operator):
             filePtr.write("  \"vertices\" : [ {} ],\n".format(vertexData))
             filePtr.write("  \"faces\" : [ {} ]\n".format(faceData))
             filePtr.write("}\n")
+            
+            print("Exported {} vertices, {} faces and {} materials".format(vertexCount, faceCount, materialCount))
 
         return {'FINISHED'}
 
