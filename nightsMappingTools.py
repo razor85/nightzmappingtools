@@ -47,38 +47,72 @@ def getSelectedObject(op, context):
 		
 	return objs[0]
 	
+# Register existing materials.
+def findExistingMaterial(textureFilename):
+	for mat in bpy.data.materials:
+		for texture_slot in mat.texture_slots:
+			if texture_slot == None or not hasattr(texture_slot, 'texture'):
+				continue
+				
+			texture = texture_slot.texture
+			if not hasattr(texture, 'image') or texture.image is None:
+				continue
+				
+			if not hasattr(texture.image, 'filepath') or texture.image.filepath is None:
+				continue
+				
+			if texture.image.filepath == textureFilename:
+				return mat
+				
+	return None
+	
+def getFaceMaterial(textureFilename, hasAlpha, object):
+	textureFile = os.path.split(textureFilename)[1]	
+	
+	# Try to find the material in the local list
+	materialName = "FaceMaterial_{}".format(os.path.splitext(textureFile)[0])
+	if materialName in materials_dict:
+		print("Using existing material {}".format(materialName))
+		return materials_dict[ materialName ]
+		
+	existingMaterial = findExistingMaterial(textureFilename)
+	if existingMaterial is not None:
+		materials_dict[ materialName ] = existingMaterial
+		print("Registered existing material {} as {} for mapping.".format(existingMaterial.name, materialName))
+		return existingMaterial
+		
+	# Couldn't find material anywhere, register a new one.
+	newMaterial = bpy.data.materials.new(materialName)
+	newMaterial.use_shadeless = True
+	newMaterial.use_transparency = hasAlpha
+	newMaterial.transparency_method = 'Z_TRANSPARENCY'
+	newMaterial.alpha = 0
+			
+	newTextureName = "FaceTexture_{}".format(os.path.splitext(textureFile)[0])
+	newTexture = bpy.data.textures.new(newTextureName, "IMAGE")
+	newTexture.image = bpy.data.images.load(textureFilename)
+			
+	newMaterial.texture_slots.add()
+	newMaterial.texture_slots[0].texture = newTexture
+	newMaterial.texture_slots[0].use_map_alpha = hasAlpha
+	newMaterial.texture_slots[0].alpha_factor = 1.0
+		
+	materials_dict[ materialName ] = newMaterial
+	print("Registered new material for mapping: {}".format(materialName))
+	return newMaterial
+	
 def doApplyBrowserTextureToFace(hasAlpha, op, context):
 	textureFilename = getSelectedTexture(op, context)
-	textureFile = os.path.split(textureFilename)[1]
 	object = getSelectedObject(op, context)
 	
 	if len(object.data.uv_layers) == 0:
 		bpy.ops.mesh.uv_texture_add()
 	
-	# Create a new material
-	materialName = "FaceMaterial_{}".format(os.path.splitext(textureFile)[0])
-	if materialName in materials_dict:
-		newMaterial = materials_dict[ materialName ]
-	else:
-		newMaterial = bpy.data.materials.new(materialName)
-		newMaterial.use_shadeless = True
-		newMaterial.use_transparency = hasAlpha
-		newMaterial.transparency_method = 'Z_TRANSPARENCY'
-		newMaterial.alpha = 0
-			
-		newTextureName = "FaceTexture_{}".format(os.path.splitext(textureFile)[0])
-		newTexture = bpy.data.textures.new(newTextureName, "IMAGE")
-		newTexture.image = bpy.data.images.load(textureFilename)
-			
-		newMaterial.texture_slots.add()
-		newMaterial.texture_slots[0].texture = newTexture
-		newMaterial.texture_slots[0].use_map_alpha = hasAlpha
-		newMaterial.texture_slots[0].alpha_factor = 1.0
+	material = getFaceMaterial(textureFilename, hasAlpha, object)
+	if material.name not in object.data.materials:
+		object.data.materials.append(material)
 		
-		object.data.materials.append(newMaterial)
-		materials_dict[ materialName ] = newMaterial
-		
-	newMaterialIndex = object.data.materials.keys().index(newMaterial.name)
+	materialIndex = object.data.materials.keys().index(material.name)
 	mesh = bmesh.from_edit_mesh(object.data)
 	selectedFaces = [f for f in mesh.faces if f.select]
 	if len(selectedFaces) == 0:	
@@ -94,7 +128,7 @@ def doApplyBrowserTextureToFace(hasAlpha, op, context):
 		bpy.ops.uv.unwrap()
 		bpy.ops.uv.reset()
 			
-		f.material_index = newMaterialIndex
+		f.material_index = materialIndex
 		f.select = False
 		
 	# Reselect
