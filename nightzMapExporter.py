@@ -7,6 +7,7 @@ import os
 import pathlib
 import gpu
 import sys
+import shutil
 import socket
 from socket import ntohl
 from socket import ntohs
@@ -30,6 +31,9 @@ class ExportMap(bpy.types.Operator):
     bl_idname = "export.to_generic_json_map"
     bl_label = "Export Generic Map (.json)"
     filepath = bpy.props.StringProperty(subtype='FILE_PATH')
+    copyTextures = bpy.props.BoolProperty(name="Copy textures to destination path",
+                                          description="Copy textures to destination path",
+                                          default = True)
         
     @classmethod
     def poll(cls, context):
@@ -94,7 +98,11 @@ class ExportMap(bpy.types.Operator):
                 textureImage = texture.image
                 if textureImage.filepath != None:
                     tmpPath = pathlib.Path(textureImage.filepath)
-                    texturePath = str(tmpPath).replace("\\", "\\\\")
+                    if self.copyTextures:
+                        shutil.copyfile(str(tmpPath), str(self.getTexturesPath() / tmpPath.name))
+                        texturePath = self.getTexturesPath().stem + "/" + tmpPath.name
+                    else:
+                        texturePath = str(tmpPath).replace("\\", "\\\\")
                     
             matString = "\"name\" : \"{}\", \"texture\" : \"{}\"".format(matName, texturePath)
             materials.append("{" + matString + " } ")
@@ -142,9 +150,21 @@ class ExportMap(bpy.types.Operator):
               if material.name not in self.materialDict:
                 self.materialDict[ material.name ] = material
                 print("Registered used material \"{}\"".format(material.name))
-
+                
+    def getTexturesPath(self):
+        filePath = Path(self.filepath)
+        filePathNoExt = filePath.parents[0] / filePath.stem
+        return filePath.parents[0] / (filePath.stem + '_Textures') 
+            
+    def createTexturePathIfNeeded(self):
+        if self.copyTextures:
+            filePathTexturesDir = self.getTexturesPath()
+            filePathTexturesDir.mkdir(parents=True, exist_ok=True)
+        
     def execute(self, context):
         print("Saving generic map to '{}'...".format(self.filepath))
+        self.createTexturePathIfNeeded()
+        
         self.materialDict = {}
                 
         # Traverse scene and update meshes.
