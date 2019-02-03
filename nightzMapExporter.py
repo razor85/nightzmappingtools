@@ -23,6 +23,11 @@ bl_info = {
     "category": "Import-Export",
 }
 
+# Face flags
+FLAG_DITHERING = 1
+FLAG_TRANSPARENCY = 2
+FLAG_IGNORE_FACE_SIZE = 4
+
 # Hold BMesh for each mesh.
 globalMeshes = {}
 
@@ -54,12 +59,15 @@ class ExportMap(bpy.types.Operator):
             objMesh.from_mesh(obj.data)
             objMesh.faces.ensure_lookup_table()
             
+            assert obj.data.uv_layers.active != None, 'Object must have a UV channel'
+            uvLayer = obj.data.uv_layers.active.data
+            
             if objMesh.faces.layers.int.get("FaceFlags") is None:
               objMesh.faces.layers.int.new("FaceFlags")
               
             flagsLayer = objMesh.faces.layers.int.get("FaceFlags")
 
-            print("Writing obj faces (with {} vertices) starting at vertex index {}".format(len(obj.data.vertices), vertexCount))
+            # print("Writing obj faces (with {} vertices) starting at vertex index {}".format(len(obj.data.vertices), vertexCount))
             for poly in objMesh.faces:
                 indices = []
                 if len(poly.loops) == 3:
@@ -69,10 +77,18 @@ class ExportMap(bpy.types.Operator):
                 
                 materialIndex = poly.material_index
                 assert materialIndex != None, 'Object must have a material'
-                material = obj.data.materials[materialIndex]             
+                material = obj.data.materials[materialIndex]
                 
+                # Get UV Data
+                uvs = [ uvLayer[ indices[ x ] ].uv for x in range(0, len(indices)) ]
+                uvArray = []
+                for uv in uvs:
+                    uvArray.append(uv[0])
+                    uvArray.append(uv[1])
+                                
                 faceData = "{ "
                 faceData += "\"indices\" : [ {} ],\n".format(", ".join(str(x + vertexCount) for x in indices))
+                faceData += "\"uvs\" : [ {} ],\n".format(", ".join(str(x) for x in uvArray))
                 faceData += "\"material\" : \"{}\"\n".format(material.name)
                 faceData += "}"
                 
@@ -149,7 +165,7 @@ class ExportMap(bpy.types.Operator):
               material = objData.materials[matIndex]
               if material.name not in self.materialDict:
                 self.materialDict[ material.name ] = material
-                print("Registered used material \"{}\"".format(material.name))
+                # print("Registered used material \"{}\"".format(material.name))
                 
     def getTexturesPath(self):
         filePath = Path(self.filepath)
@@ -187,6 +203,7 @@ class ExportMap(bpy.types.Operator):
             vertexCount, vertexData = self.getVertexData()
             faceCount, faceData = self.getFaces()
             materialCount, materialData = self.getMaterials()
+            entitiesData = ""
             
             # print("Vertex Data:\n {} \n\n".format(vertexData))
             # print("Face Data:\n {} \n\n".format(faceData))
@@ -198,7 +215,8 @@ class ExportMap(bpy.types.Operator):
             filePtr.write("  \"numMaterials\" : {},\n".format(materialCount))
             filePtr.write("  \"materials\" : [ {} ],\n".format(materialData))
             filePtr.write("  \"vertices\" : [ {} ],\n".format(vertexData))
-            filePtr.write("  \"faces\" : [ {} ]\n".format(faceData))
+            filePtr.write("  \"faces\" : [ {} ],\n".format(faceData))
+            filePtr.write("  \"entities\" : [ {} ]\n".format(entitiesData))
             filePtr.write("}\n")
             
             print("Exported {} vertices, {} faces and {} materials".format(vertexCount, faceCount, materialCount))
